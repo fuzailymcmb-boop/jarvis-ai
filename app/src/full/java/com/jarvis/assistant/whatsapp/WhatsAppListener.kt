@@ -63,27 +63,25 @@ class WhatsAppListener : NotificationListenerService() {
         ))
     }
 
-    private fun submitReply(key: String, replyText: String): ReplyResult {
-        if (replyText.isBlank() || replyText.length > 1500) return ReplyResult.INVALID
+    private fun submitReply(key: String, replyText: String): WhatsAppReplyResult {
+        if (replyText.isBlank() || replyText.length > 1500) return WhatsAppReplyResult.INVALID
         val sbn = try { activeNotifications?.firstOrNull { it.key == key } }
-        catch (_: SecurityException) { null } ?: return ReplyResult.NOT_FOUND
-        if (sbn.packageName !in PACKAGES) return ReplyResult.NOT_FOUND
+        catch (_: SecurityException) { null } ?: return WhatsAppReplyResult.NOT_FOUND
+        if (sbn.packageName !in PACKAGES) return WhatsAppReplyResult.NOT_FOUND
 
         val action = sbn.notification.actions?.firstOrNull { action ->
             action.remoteInputs?.any { it.allowFreeFormInput } == true
-        } ?: return ReplyResult.NO_REPLY_ACTION
-        val inputs = action.remoteInputs ?: return ReplyResult.NO_REPLY_ACTION
+        } ?: return WhatsAppReplyResult.NO_REPLY_ACTION
+        val inputs = action.remoteInputs ?: return WhatsAppReplyResult.NO_REPLY_ACTION
         val payload = Bundle()
         inputs.filter { it.allowFreeFormInput }.forEach { payload.putCharSequence(it.resultKey, replyText) }
         val replyIntent = Intent()
         RemoteInput.addResultsToIntent(inputs, replyIntent, payload)
         return try {
             action.actionIntent.send(this, 0, replyIntent)
-            ReplyResult.SUBMITTED
-        } catch (_: Exception) { ReplyResult.ERROR }
+            WhatsAppReplyResult.SUBMITTED
+        } catch (_: Exception) { WhatsAppReplyResult.ERROR }
     }
-
-    enum class ReplyResult { SUBMITTED, NOT_FOUND, NO_REPLY_ACTION, INVALID, ERROR, NOT_CONNECTED }
 
     companion object {
         private val PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
@@ -91,7 +89,7 @@ class WhatsAppListener : NotificationListenerService() {
         @Volatile private var activeInstance: WhatsAppListener? = null
 
         /** Must only be called AFTER the user taps the confirmation button. */
-        fun replyToConfirmedMessage(notificationKey: String, text: String): ReplyResult =
-            activeInstance?.submitReply(notificationKey, text) ?: ReplyResult.NOT_CONNECTED
+        fun replyToConfirmedMessage(notificationKey: String, text: String): WhatsAppReplyResult =
+            activeInstance?.submitReply(notificationKey, text) ?: WhatsAppReplyResult.NOT_CONNECTED
     }
 }

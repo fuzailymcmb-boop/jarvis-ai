@@ -4,7 +4,7 @@ import com.jarvis.assistant.data.WhatsAppMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** In-memory only: message content is never written to local files or uploaded. */
+/** Full edition only. Message content is never written to local files or uploaded. */
 object WhatsAppStore {
     private val mutable = MutableStateFlow<List<WhatsAppMessage>>(emptyList())
     val messages = mutable.asStateFlow()

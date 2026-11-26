@@ -52,12 +52,12 @@ import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
 
-private val Background = Color(0xFF050E19)
-private val Panel = Color(0xFF0E2232)
-private val Cyan = Color(0xFF24DBEC)
+internal val Background = Color(0xFF050E19)
+internal val Panel = Color(0xFF0E2232)
+internal val Cyan = Color(0xFF24DBEC)
 private val Indigo = Color(0xFF788CFF)
-private val Muted = Color(0xFF92ACBF)
-private val White = Color(0xFFEAFBFF)
+internal val Muted = Color(0xFF92ACBF)
+internal val White = Color(0xFFEAFBFF)
 
 enum class JarvisTab { HOME, WHATSAPP, REMINDERS, SETTINGS }
 data class ReplyDraft(val key: String, val contact: String, val proposed: String)
@@ -69,6 +69,10 @@ fun JarvisApp(
     conversation: List<ChatLine>,
     reminders: List<Reminder>,
     whatsApp: List<WhatsAppMessage>,
+    notificationAccessEnabled: Boolean,
+    manualWhatsAppDraft: String,
+    onManualWhatsAppDraftChange: (String) -> Unit,
+    onShareWhatsAppDraft: (String) -> Unit,
     status: String,
     listening: Boolean,
     thinking: Boolean,
@@ -107,30 +111,34 @@ fun JarvisApp(
                 .background(Brush.verticalGradient(listOf(Background, Color(0xFF091D2C), Background)))
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
-            Header(status)
+            Header(status, notificationAccessEnabled)
             Box(Modifier.weight(1f)) {
                 when (activeTab) {
                     JarvisTab.HOME -> HomeScreen(conversation, listening, thinking, onMic, onText,
-                        onReadWhatsApp, { onChangeTab(JarvisTab.REMINDERS) })
-                    JarvisTab.WHATSAPP -> WhatsAppScreen(whatsApp, onReadWhatsApp,
-                        onOpenNotificationAccess, onOpenWhatsApp, onRequestReply)
+                        notificationAccessEnabled,
+                        { if (notificationAccessEnabled) onReadWhatsApp() else onChangeTab(JarvisTab.WHATSAPP) },
+                        { onChangeTab(JarvisTab.REMINDERS) })
+                    JarvisTab.WHATSAPP -> EditionWhatsAppScreen(whatsApp, onReadWhatsApp,
+                        onOpenNotificationAccess, onOpenWhatsApp, onRequestReply,
+                        manualWhatsAppDraft, onManualWhatsAppDraftChange, onShareWhatsAppDraft)
                     JarvisTab.REMINDERS -> RemindersScreen(reminders, onAddReminder, onDeleteReminder)
                     JarvisTab.SETTINGS -> SettingsScreen(backendUrl, hasToken, speakReplies,
                         onSaveConnection, onClearToken, onToggleSpeech, onRequestNotifications,
-                        onOpenNotificationAccess, onRequestExactAlarms, exactRemindersEnabled)
+                        onOpenNotificationAccess, onRequestExactAlarms, exactRemindersEnabled,
+                        notificationAccessEnabled)
                 }
             }
             BottomBar(activeTab, onChangeTab)
         }
 
-        if (pendingReply != null) {
-            ReplyConfirmationDialog(pendingReply, onDismissReply, onConfirmReply)
+        if (notificationAccessEnabled && pendingReply != null) {
+            EditionReplyDialog(pendingReply, onDismissReply, onConfirmReply)
         }
     }
 }
 
 @Composable
-private fun Header(status: String) {
+private fun Header(status: String, notificationAccessEnabled: Boolean) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -140,7 +148,8 @@ private fun Header(status: String) {
             }
             Column {
                 Text("JARVIS", color = White, fontSize = 21.sp, letterSpacing = 4.sp, fontWeight = FontWeight.Bold)
-                Text("PERSONAL AI ASSISTANT", color = Muted, fontSize = 9.sp, letterSpacing = 1.5.sp)
+                Text(if (notificationAccessEnabled) "FULL EDITION" else "CORE EDITION",
+                    color = Muted, fontSize = 9.sp, letterSpacing = 1.5.sp)
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -156,7 +165,8 @@ private fun Header(status: String) {
 @Composable
 private fun HomeScreen(
     conversation: List<ChatLine>, listening: Boolean, thinking: Boolean,
-    onMic: () -> Unit, onText: (String) -> Unit, onReadWhatsApp: () -> Unit, onReminders: () -> Unit
+    onMic: () -> Unit, onText: (String) -> Unit, notificationAccessEnabled: Boolean,
+    onWhatsApp: () -> Unit, onReminders: () -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     val state = rememberLazyListState()
@@ -175,7 +185,8 @@ private fun HomeScreen(
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            TinyAction("READ WHATSAPP", Icons.Default.Chat, Modifier.weight(1f), onReadWhatsApp)
+            TinyAction(if (notificationAccessEnabled) "READ WHATSAPP" else "WRITE WHATSAPP",
+                Icons.Default.Chat, Modifier.weight(1f), onWhatsApp)
             TinyAction("REMINDERS", Icons.Default.Schedule, Modifier.weight(1f), onReminders)
         }
         Spacer(Modifier.height(10.dp))
@@ -265,7 +276,7 @@ private fun ChatBubble(item: ChatLine) {
 }
 
 @Composable
-private fun TinyAction(label: String, icon: ImageVector, modifier: Modifier = Modifier, click: () -> Unit) {
+internal fun TinyAction(label: String, icon: ImageVector, modifier: Modifier = Modifier, click: () -> Unit) {
     Surface(onClick = click, shape = RoundedCornerShape(12.dp), color = Panel,
         border = BorderStroke(1.dp, Cyan.copy(alpha = 0.28f)), modifier = modifier) {
         Row(Modifier.padding(horizontal = 11.dp, vertical = 11.dp),
@@ -273,60 +284,6 @@ private fun TinyAction(label: String, icon: ImageVector, modifier: Modifier = Mo
             Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp), tint = Cyan)
             Spacer(Modifier.width(7.dp))
             Text(label, color = White, fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
-        }
-    }
-}
-
-@Composable
-private fun WhatsAppScreen(
-    messages: List<WhatsAppMessage>, onRead: () -> Unit,
-    onPermission: () -> Unit, onOpen: () -> Unit, onReply: (WhatsAppMessage) -> Unit
-) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        PageHeading("WHATSAPP", "Recent active notifications · personal + business")
-        InfoPanel("PRIVATE BY DESIGN",
-            "Only WhatsApp notifications you explicitly grant access to are displayed. No chat history is read or stored. Replies require your confirmation.")
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TinyAction("ALLOW ACCESS", Icons.Default.LockOpen, Modifier.weight(1f), onPermission)
-            TinyAction("OPEN APP", Icons.Default.OpenInNew, Modifier.weight(1f), onOpen)
-        }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onRead, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(17.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("READ NOTIFICATIONS ALOUD")
-        }
-        Spacer(Modifier.height(10.dp))
-        if (messages.isEmpty()) {
-            EmptyPanel("NO ACTIVE NOTIFICATIONS", "Grant Android notification access and receive a new WhatsApp message to see it here.")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(11.dp),
-                contentPadding = PaddingValues(bottom = 16.dp)) {
-                items(messages, key = { it.notificationKey }) { msg ->
-                    Surface(shape = RoundedCornerShape(16.dp), color = Panel,
-                        border = BorderStroke(1.dp, Cyan.copy(alpha = 0.18f))) {
-                        Column(Modifier.padding(15.dp)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(msg.sender, color = White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(if (msg.business) "BUSINESS" else "WHATSAPP", color = Cyan, fontSize = 9.sp)
-                            }
-                            Spacer(Modifier.height(7.dp))
-                            Text(msg.text, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 5)
-                            Spacer(Modifier.height(11.dp))
-                            Button(onClick = { onReply(msg) }, enabled = msg.canReply,
-                                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Background),
-                                shape = RoundedCornerShape(10.dp)) {
-                                Icon(Icons.Default.Reply, contentDescription = null, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (msg.canReply) "DRAFT A REPLY" else "REPLY IN WHATSAPP")
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -415,12 +372,17 @@ private fun SettingsScreen(
     backendUrl: String, hasToken: Boolean, speakReplies: Boolean,
     onSave: (String, String) -> Unit, onClearToken: () -> Unit, onToggleSpeech: (Boolean) -> Unit,
     onNotifications: () -> Unit, onWhatsApp: () -> Unit,
-    onExactAlarms: () -> Unit, exact: Boolean
+    onExactAlarms: () -> Unit, exact: Boolean, notificationAccessEnabled: Boolean
 ) {
     var url by remember(backendUrl) { mutableStateOf(backendUrl) }
     var token by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
         PageHeading("SETTINGS", "Access controls & secure AI connection")
+        if (!notificationAccessEnabled) {
+            InfoPanel("CORE EDITION", "Voice and reminders, with manual WhatsApp drafts. " +
+                "This edition cannot read notifications or reply automatically.")
+            Spacer(Modifier.height(12.dp))
+        }
         InfoPanel("AI SERVER", "JARVIS connects to your own backend. Your OpenAI API key stays on the server, never inside the Android app.")
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = url, onValueChange = { url = it },
@@ -451,17 +413,19 @@ private fun SettingsScreen(
         Text("ANDROID PERMISSIONS", color = Cyan, letterSpacing = 1.6.sp, fontSize = 11.sp,
             fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        PermissionRow("WHATSAPP NOTIFICATION ACCESS", "Read current notifications and use supported quick replies", onWhatsApp)
+        EditionNotificationPermission(onWhatsApp)
         PermissionRow("REMINDER NOTIFICATIONS", "Allow JARVIS to display reminder alerts", onNotifications)
         PermissionRow("EXACT ALARM ACCESS", if (exact) "Enabled" else "Not enabled; alarms may be delayed", onExactAlarms)
         Spacer(Modifier.height(14.dp))
-        InfoPanel("SAFETY", "No automatic sending. No chat-history scraping. No continuous microphone recording. Your recent notifications remain in memory only and are never sent to the AI server.")
+        InfoPanel("SAFETY", if (notificationAccessEnabled)
+            "No automatic sending. No chat-history scraping. No continuous microphone recording. Your recent notifications remain in memory only and are never sent to the AI server."
+            else "No notification reading or automatic replies. Microphone access starts only when you tap to speak. WhatsApp drafts are handed to WhatsApp only when you select Review in WhatsApp.")
         Spacer(Modifier.height(30.dp))
     }
 }
 
 @Composable
-private fun PermissionRow(label: String, detail: String, onClick: () -> Unit) {
+internal fun PermissionRow(label: String, detail: String, onClick: () -> Unit) {
     Surface(onClick = onClick, color = Panel, shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -477,28 +441,7 @@ private fun PermissionRow(label: String, detail: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ReplyConfirmationDialog(draft: ReplyDraft, onDismiss: () -> Unit, onSend: (String) -> Unit) {
-    var text by remember(draft.key) { mutableStateOf(draft.proposed) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Confirm WhatsApp reply") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("To: ${draft.contact}\nThis will submit a reply through the current WhatsApp notification.", fontSize = 13.sp)
-                OutlinedTextField(value = text, onValueChange = { text = it.take(1500) },
-                    label = { Text("Message") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                Text("Nothing is sent until you select Confirm & send.", color = Cyan, fontSize = 11.sp)
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onSend(text) }, enabled = text.isNotBlank()) { Text("CONFIRM & SEND") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL") } }
-    )
-}
-
-@Composable
-private fun PageHeading(title: String, subtitle: String) {
+internal fun PageHeading(title: String, subtitle: String) {
     Spacer(Modifier.height(12.dp))
     Text(title, color = White, fontSize = 23.sp, letterSpacing = 3.sp, fontWeight = FontWeight.Bold)
     Text(subtitle, color = Muted, fontSize = 12.sp)
@@ -506,7 +449,7 @@ private fun PageHeading(title: String, subtitle: String) {
 }
 
 @Composable
-private fun InfoPanel(title: String, text: String) {
+internal fun InfoPanel(title: String, text: String) {
     Surface(color = Cyan.copy(alpha = 0.07f), shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, Cyan.copy(alpha = 0.2f))) {
         Column(Modifier.fillMaxWidth().padding(13.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -517,7 +460,7 @@ private fun InfoPanel(title: String, text: String) {
 }
 
 @Composable
-private fun EmptyPanel(title: String, subtitle: String) {
+internal fun EmptyPanel(title: String, subtitle: String) {
     Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Default.Sensors, null, tint = Cyan, modifier = Modifier.size(38.dp))
         Spacer(Modifier.height(12.dp))

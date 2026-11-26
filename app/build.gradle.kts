@@ -12,9 +12,22 @@ android {
         applicationId = "com.jarvis.assistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    flavorDimensions += "edition"
+    productFlavors {
+        create("core") {
+            dimension = "edition"
+            versionNameSuffix = "-core"
+            buildConfigField("boolean", "NOTIFICATION_ACCESS_ENABLED", "false")
+        }
+        create("full") {
+            dimension = "edition"
+            buildConfigField("boolean", "NOTIFICATION_ACCESS_ENABLED", "true")
+        }
     }
 
     buildTypes {

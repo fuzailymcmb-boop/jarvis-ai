@@ -53,13 +53,20 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Test, check, and compile Android app
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Test, check, and compile both Android editions
+        run: >-
+          gradle --no-daemon --stacktrace
+          :app:testCoreDebugUnitTest :app:testFullDebugUnitTest
+          :app:lintCoreDebug :app:lintFullDebug
+          :app:assembleCoreDebug :app:assembleFullDebug
+
+      - name: Verify Core APK permissions and excluded notification code
+        run: bash .github/scripts/verify-core-apk.sh
 
       - name: Enable emulator acceleration
         run: sudo chmod 666 /dev/kvm
 
-      - name: Verify first launch on Android 10
+      - name: Verify Core installation and first launch on Android 10
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -67,22 +74,37 @@ jobs:
           target: default
           profile: pixel_2
           emulator-boot-timeout: 300
-          script: bash .github/scripts/smoke-test.sh
+          script: bash .github/scripts/smoke-test.sh app/build/outputs/apk/core/debug/app-core-debug.apk
 
-      - name: Verify APK signature and write checksum
+      - name: Verify APK signatures and write checksums
         run: |
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
-          cd app/build/outputs/apk/debug
-          mv app-debug.apk JARVIS-AI-debug.apk
-          sha256sum JARVIS-AI-debug.apk > SHA256SUMS.txt
+          set -euo pipefail
+          mkdir -p app/build/deliverables/core app/build/deliverables/full
+          for edition in core full; do
+            apk="app/build/outputs/apk/$edition/debug/app-$edition-debug.apk"
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+            if [[ "$edition" == core ]]; then
+              filename="JARVIS-AI-Core-0.1.1.apk"
+            else
+              filename="JARVIS-AI-Full-0.1.1.apk"
+            fi
+            cp "$apk" "app/build/deliverables/$edition/$filename"
+            (cd "app/build/deliverables/$edition" && sha256sum "$filename" > SHA256SUMS.txt)
+          done
 
-      - name: Publish APK to workflow artifacts
+      - name: Save Core APK to workflow artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: JARVIS-AI-Android-debug-APK
-          path: |
-            app/build/outputs/apk/debug/JARVIS-AI-debug.apk
-            app/build/outputs/apk/debug/SHA256SUMS.txt
+          name: JARVIS-AI-Core-Android-debug-APK
+          path: app/build/deliverables/core/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Save Full APK to workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: JARVIS-AI-Full-Android-debug-APK
+          path: app/build/deliverables/full/
           if-no-files-found: error
           retention-days: 30
 

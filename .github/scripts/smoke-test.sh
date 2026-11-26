@@ -3,7 +3,8 @@ set -euo pipefail
 
 jarvis_report_dir="app/build/reports/device-smoke"
 mkdir -p "$jarvis_report_dir"
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+jarvis_apk="${1:-app/build/outputs/apk/core/debug/app-core-debug.apk}"
+adb install -r "$jarvis_apk"
 adb logcat -c
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard

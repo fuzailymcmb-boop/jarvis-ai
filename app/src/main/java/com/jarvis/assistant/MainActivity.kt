@@ -25,8 +25,8 @@ import com.jarvis.assistant.security.SecureTokenStore
 import com.jarvis.assistant.ui.JarvisApp
 import com.jarvis.assistant.ui.JarvisTab
 import com.jarvis.assistant.ui.ReplyDraft
-import com.jarvis.assistant.whatsapp.WhatsAppListener
-import com.jarvis.assistant.whatsapp.WhatsAppStore
+import com.jarvis.assistant.whatsapp.WhatsAppAccess
+import com.jarvis.assistant.whatsapp.WhatsAppReplyResult
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import java.text.DateFormat
@@ -34,7 +34,9 @@ import java.util.Date
 
 class MainActivity : ComponentActivity() {
     private val conversation = mutableStateListOf(
-        ChatLine(Speaker.JARVIS, "System online. I'm JARVIS. Tap the microphone to speak, or type below. Try: 'Remind me to call John in 10 minutes'.")
+        ChatLine(Speaker.JARVIS, if (BuildConfig.NOTIFICATION_ACCESS_ENABLED)
+            "I'm JARVIS Full. Tap the microphone to speak, or type below. Try: 'Remind me to call John in 10 minutes'."
+            else "I'm JARVIS Core: voice, AI chat and reminders. I cannot read WhatsApp notifications or reply automatically. You can draft a message and review it inside WhatsApp.")
     )
     private val reminders = mutableStateListOf<Reminder>()
     private var currentTab by mutableStateOf(JarvisTab.HOME)
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private var hasBackendToken by mutableStateOf(false)
     private var speakReplies by mutableStateOf(true)
     private var exactRemindersEnabled by mutableStateOf(false)
+    private var manualWhatsAppDraft by mutableStateOf("")
 
     private lateinit var voice: VoiceController
     private lateinit var repo: ReminderRepository
@@ -80,13 +83,17 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            val messages by WhatsAppStore.messages.collectAsState()
+            val messages by WhatsAppAccess.messages.collectAsState()
             JarvisApp(
                 activeTab = currentTab,
                 onChangeTab = { currentTab = it },
                 conversation = conversation,
                 reminders = reminders,
                 whatsApp = messages,
+                notificationAccessEnabled = BuildConfig.NOTIFICATION_ACCESS_ENABLED,
+                manualWhatsAppDraft = manualWhatsAppDraft,
+                onManualWhatsAppDraftChange = { manualWhatsAppDraft = it.take(1500) },
+                onShareWhatsAppDraft = ::shareWhatsAppDraft,
                 status = status,
                 listening = listening,
                 thinking = thinking,
@@ -96,7 +103,11 @@ class MainActivity : ComponentActivity() {
                 onDeleteReminder = ::deleteReminder,
                 onReadWhatsApp = ::readWhatsApp,
                 onOpenWhatsApp = ::openWhatsApp,
-                onRequestReply = { msg -> draft = ReplyDraft(msg.notificationKey, msg.sender, "") },
+                onRequestReply = { msg ->
+                    if (BuildConfig.NOTIFICATION_ACCESS_ENABLED) {
+                        draft = ReplyDraft(msg.notificationKey, msg.sender, "")
+                    }
+                },
                 pendingReply = draft,
                 onDismissReply = { draft = null },
                 onConfirmReply = ::confirmReply,
@@ -171,7 +182,13 @@ class MainActivity : ComponentActivity() {
             is JarvisCommand.NewReminder -> addReminder(command.title, command.time.toEpochMilli())
             JarvisCommand.ReadWhatsApp -> readWhatsApp()
             is JarvisCommand.ReplyWhatsApp -> {
-                val matches = WhatsAppStore.messages.value.filter {
+                if (!BuildConfig.NOTIFICATION_ACCESS_ENABLED) {
+                    manualWhatsAppDraft = command.reply.take(1500)
+                    currentTab = JarvisTab.WHATSAPP
+                    respond("Draft ready. Core cannot read notifications or send a reply itself. Tap Review in WhatsApp, choose the recipient there, and send it yourself.")
+                    return
+                }
+                val matches = WhatsAppAccess.messages.value.filter {
                     it.sender.equals(command.contact, ignoreCase = true)
                 }
                 when {
@@ -202,7 +219,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (backendUrl.isBlank() || !hasBackendToken) {
-            respond("I'm ready for WhatsApp and reminders. For open-ended AI conversations, open Settings and connect your secure AI server.")
+            respond("Local reminders are ready. For open-ended AI conversations, open Settings and connect your secure AI server.")
             return
         }
         thinking = true
@@ -260,12 +277,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun readWhatsApp() {
-        val messages = WhatsAppStore.messages.value.take(3)
+        if (!BuildConfig.NOTIFICATION_ACCESS_ENABLED) {
+            respond("JARVIS Core cannot read WhatsApp messages or notifications. Use the WhatsApp tab to draft text, then choose the recipient and send it inside WhatsApp.")
+            return
+        }
+        val messages = WhatsAppAccess.messages.value.take(3)
         if (messages.isEmpty()) {
             respond("I can't see any active WhatsApp notifications. If you haven't already, enable JARVIS under Settings, Notification access. This does not expose previous chat history.")
             return
         }
-        respond("You have ${WhatsAppStore.messages.value.size} active WhatsApp notification${if (WhatsAppStore.messages.value.size == 1) "" else "s"}. " +
+        respond("You have ${WhatsAppAccess.messages.value.size} active WhatsApp notification${if (WhatsAppAccess.messages.value.size == 1) "" else "s"}. " +
             messages.joinToString(". ") { "From ${it.sender}: ${it.text.take(280)}" })
     }
 
@@ -279,15 +300,51 @@ class MainActivity : ComponentActivity() {
     private fun confirmReply(text: String) {
         val request = draft ?: return
         draft = null
-        val outcome = WhatsAppListener.replyToConfirmedMessage(request.key, text.trim())
+        if (!BuildConfig.NOTIFICATION_ACCESS_ENABLED) {
+            respond("Core has no notification reply capability. Review and send your message inside WhatsApp.", speak = false)
+            return
+        }
+        val outcome = WhatsAppAccess.replyToConfirmedMessage(request.key, text.trim())
         respond(when (outcome) {
-            WhatsAppListener.ReplyResult.SUBMITTED -> "Reply submitted to WhatsApp for ${request.contact}. Please check WhatsApp to confirm delivery."
-            WhatsAppListener.ReplyResult.NOT_FOUND -> "That notification is no longer available. No message was sent."
-            WhatsAppListener.ReplyResult.NO_REPLY_ACTION -> "This notification doesn't permit inline replies. No message was sent."
-            WhatsAppListener.ReplyResult.NOT_CONNECTED -> "Notification access isn't connected. No message was sent."
-            WhatsAppListener.ReplyResult.INVALID -> "Reply must contain 1 to 1500 characters. No message was sent."
-            WhatsAppListener.ReplyResult.ERROR -> "WhatsApp didn't accept the reply action. Delivery wasn't confirmed."
+            WhatsAppReplyResult.SUBMITTED -> "Reply submitted to WhatsApp for ${request.contact}. Please check WhatsApp to confirm delivery."
+            WhatsAppReplyResult.NOT_FOUND -> "That notification is no longer available. No message was sent."
+            WhatsAppReplyResult.NO_REPLY_ACTION -> "This notification doesn't permit inline replies. No message was sent."
+            WhatsAppReplyResult.NOT_CONNECTED -> "Notification access isn't connected. No message was sent."
+            WhatsAppReplyResult.INVALID -> "Reply must contain 1 to 1500 characters. No message was sent."
+            WhatsAppReplyResult.ERROR -> "WhatsApp didn't accept the reply action. Delivery wasn't confirmed."
+            WhatsAppReplyResult.UNAVAILABLE -> "Core has no notification reply capability. No message was sent."
         })
+    }
+
+    private fun shareWhatsAppDraft(text: String) {
+        val message = text.trim()
+        if (message.isBlank() || message.length > 1500) {
+            respond("Draft a message between 1 and 1500 characters first.", speak = false)
+            return
+        }
+        val packages = listOf("com.whatsapp", "com.whatsapp.w4b").filter {
+            packageManager.getLaunchIntentForPackage(it) != null
+        }
+        if (packages.isEmpty()) {
+            respond("I can't find WhatsApp installed on this phone.", speak = false)
+            return
+        }
+        fun shareIntent(packageName: String) = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, message)
+            setPackage(packageName)
+        }
+        val chooser = Intent.createChooser(shareIntent(packages.first()), "Review in WhatsApp")
+        if (packages.size > 1) {
+            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,
+                packages.drop(1).map(::shareIntent).toTypedArray())
+        }
+        try {
+            startActivity(chooser)
+            respond("Choose a recipient, review the draft and press Send inside WhatsApp. JARVIS has not sent a message.", speak = false)
+        } catch (_: Exception) {
+            respond("WhatsApp could not open the draft. You can copy your text and paste it into WhatsApp.", speak = false)
+        }
     }
 
     private fun saveConnection(url: String, token: String) {
@@ -314,7 +371,7 @@ class MainActivity : ComponentActivity() {
         getSharedPreferences("jarvis_settings", MODE_PRIVATE).edit()
             .putString("backend_url", cleanUrl).apply()
         hasBackendToken = !secrets.read().isNullOrBlank()
-        respond(if (cleanUrl.isBlank()) "AI server disconnected. Local WhatsApp and reminders remain available."
+        respond(if (cleanUrl.isBlank()) "AI server disconnected. Local reminders remain available."
             else if (!hasBackendToken) "Server URL saved. Enter this server's access token to connect."
             else "Connection settings saved. Send a test question on the Home tab to check the server.", speak = false)
     }
@@ -336,8 +393,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotificationAccess() {
-        try { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-        catch (_: Exception) { respond("Please enable JARVIS under Android Settings > Apps > Special app access > Notification access.", speak = false) }
+        if (!BuildConfig.NOTIFICATION_ACCESS_ENABLED) return
+        if (!WhatsAppAccess.openNotificationAccessSettings(this)) {
+            respond("Please enable JARVIS Full under Android Settings > Apps > Special app access > Notification access.", speak = false)
+        }
     }
 
     private fun requestExactAlarmAccess() {
