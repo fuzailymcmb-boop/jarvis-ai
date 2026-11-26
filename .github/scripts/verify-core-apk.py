@@ -26,13 +26,17 @@ CORE_EXCLUDED_DEX_STRINGS = (
     b"Lcom/jarvis/assistant/whatsapp/WhatsAppListener;",
     b"Lcom/jarvis/assistant/whatsapp/WhatsAppStore;",
     b"Landroid/service/notification/NotificationListenerService;",
-    b"Landroid/service/notification/StatusBarNotification;",
     b"android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS",
     b"android.settings.NOTIFICATION_LISTENER_SETTINGS",
     b"android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS",
     b"Lcom/jarvis/assistant/whatsapp/WhatsAppListener$",
     b"Lcom/jarvis/assistant/whatsapp/WhatsAppStore$",
 )
+# Do not globally reject StatusBarNotification. AndroidX Core 1.15.0 uses that
+# result type in NotificationManagerCompat.Api23Impl.getActiveNotifications(),
+# which queries the calling app's own notifications through NotificationManager.
+# https://developer.android.com/reference/androidx/core/app/NotificationManagerCompat#getActiveNotifications()
+# The shell script saves the actual packaged helper bytecode for inspection.
 
 
 def dex_bytes(apk):
@@ -73,12 +77,12 @@ core_dex = dex_bytes(core_apk)
 full_dex = dex_bytes(full_apk)
 for excluded in CORE_EXCLUDED_DEX_STRINGS:
     assert excluded not in core_dex, f"Notification-reading code/settings remain in Core: {excluded.decode()}"
-for expected in CORE_EXCLUDED_DEX_STRINGS[:4]:
+for expected in CORE_EXCLUDED_DEX_STRINGS[:3]:
     assert expected in full_dex, f"Positive control failed: Full missing {expected.decode()}"
 
 print("PASS: Core retains com.jarvis.assistant and is versioned 0.1.1-core.")
 print("PASS: Core declares only expected voice, network, reminder, and AndroidX internal permissions.")
 print("PASS: Core has no notification-listener, accessibility, or SMS manifest declarations.")
-print("PASS: Core DEX excludes the notification reader/store, platform listener classes, and notification-access Settings links.")
+print("PASS: Core DEX excludes the notification reader/store, platform listener service, and notification-access Settings links.")
 print("PASS: Full still contains its declared notification listener and implementation.")
 print("This audit verifies the packaged capability separation; it is not Google Play Protect approval.")
