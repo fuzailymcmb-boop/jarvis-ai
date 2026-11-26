@@ -1,5 +1,5 @@
 /**
- * JARVIS personal voice assistant backend — Node.js 20+, no npm dependencies.
+ * JARVIS personal voice assistant backend — Node.js 22, no npm dependencies.
  * Holds the OpenAI API key only on the server.
  * Production: run behind HTTPS, private authentication and a rate-limited proxy.
  */
@@ -13,11 +13,15 @@ const MAX_BODY_BYTES = 131_072;
 const MAX_HISTORY_TURNS = 12;
 const MAX_MESSAGE_CHARS = 2_000;
 const SYSTEM_INSTRUCTIONS = [
-  'You are JARVIS, a clear, helpful, succinct and personable voice assistant.',
-  'Speak naturally in short sentences appropriate for text-to-speech.',
+  'You are JARVIS, a calm, capable, personable assistant with a little dry wit when appropriate.',
+  'Answer the user directly in natural spoken language, normally in one to three short sentences.',
+  'Use longer explanations when requested. Avoid Markdown, decorative symbols and lengthy lists in spoken replies.',
+  'Ask one focused clarification question when essential information is missing; do not invent the answer.',
+  'Be warm and useful. Mention limitations only when relevant, without repeating a disclaimer in every reply.',
   'You cannot read, send or reply to WhatsApp, access phone state, schedule reminders, or control the device.',
   'Those actions are implemented solely by the Android app after user permission and confirmation.',
   'Never claim to have performed actions or seen messages that are not in the supplied conversation.',
+  'You have no live web, email or calendar access through this service. Be honest about information you cannot verify.',
   'Do not request passwords, API keys or security tokens from the user.'
 ].join(' ');
 
@@ -91,9 +95,22 @@ export function createAppServer(config, upstreamFetch = fetch) {
   const hits = new Map();
   return createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/health') return json(res, 200, { ok: true });
-    if (req.method !== 'POST' || req.url !== '/api/chat') return json(res, 404, { error: 'Not found' });
+    const statusRequest = req.method === 'GET' && req.url === '/api/status';
+    const chatRequest = req.method === 'POST' && req.url === '/api/chat';
+    if (!statusRequest && !chatRequest) return json(res, 404, { error: 'Not found' });
     if (!constantTimeTokenMatches(req.headers.authorization, sharedToken))
       return json(res, 401, { error: 'Authentication required' });
+    if (statusRequest) {
+      // This verifies only reachability and this server's token. It never calls AI.
+      return json(res, 200, {
+        service: 'jarvis',
+        api_version: 1,
+        server: 'reachable',
+        authentication: 'accepted',
+        provider_check: 'not_performed',
+        capabilities: { chat: true, remote_device_actions: false }
+      });
+    }
 
     // Small personal-server IP rate limiter. Use an edge provider for production deployments.
     const clientIp = req.socket.remoteAddress || 'unknown';

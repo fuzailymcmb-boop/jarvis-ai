@@ -19,8 +19,8 @@ function fakeOpenAi(url, options) {
   });
 }
 
-async function startTestServer() {
-  const server = createAppServer({ apiKey: 'test-api-key', sharedToken: TOKEN }, fakeOpenAi);
+async function startTestServer(upstreamFetch = fakeOpenAi) {
+  const server = createAppServer({ apiKey: 'test-api-key', sharedToken: TOKEN }, upstreamFetch);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   return { server, url: `http://127.0.0.1:${server.address().port}` };
 }
@@ -83,5 +83,80 @@ test('Bad method or route cannot call AI', async () => {
   const { server, url } = await startTestServer();
   try {
     assert.equal((await fetch(`${url}/api/chat`)).status, 404);
+  } finally { server.close(); }
+});
+
+test('Status verifies the server token without contacting the AI provider', async () => {
+  let upstreamCalls = 0;
+  const { server, url } = await startTestServer(() => {
+    upstreamCalls += 1;
+    throw new Error('Status must not call the provider');
+  });
+  try {
+    const res = await fetch(`${url}/api/status`, {
+      headers: { Authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await res.json(), {
+      service: 'jarvis',
+      api_version: 1,
+      server: 'reachable',
+      authentication: 'accepted',
+      provider_check: 'not_performed',
+      capabilities: { chat: true, remote_device_actions: false }
+    });
+    assert.equal(upstreamCalls, 0);
+  } finally { server.close(); }
+});
+
+test('Status rejects missing or incorrect tokens without contacting the provider', async () => {
+  let upstreamCalls = 0;
+  const { server, url } = await startTestServer(() => {
+    upstreamCalls += 1;
+    throw new Error('Unauthenticated status must not call the provider');
+  });
+  try {
+    const headersToCheck = [
+      {},
+      { Authorization: `Bearer ${TOKEN.slice(0, -1)}X` },
+      { Authorization: `Basic ${TOKEN}` }
+    ];
+    for (const headers of headersToCheck) {
+      const res = await fetch(`${url}/api/status`, { headers });
+      assert.equal(res.status, 401);
+      assert.deepEqual(await res.json(), { error: 'Authentication required' });
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally { server.close(); }
+});
+
+test('Health stays public and generic without contacting the provider', async () => {
+  let upstreamCalls = 0;
+  const { server, url } = await startTestServer(() => {
+    upstreamCalls += 1;
+    throw new Error('Health must not call the provider');
+  });
+  try {
+    const res = await fetch(`${url}/health`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(upstreamCalls, 0);
+  } finally { server.close(); }
+});
+
+test('Unsupported status methods cannot call the provider', async () => {
+  let upstreamCalls = 0;
+  const { server, url } = await startTestServer(() => {
+    upstreamCalls += 1;
+    throw new Error('Unsupported status methods must not call the provider');
+  });
+  try {
+    const res = await fetch(`${url}/api/status`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'Not found' });
+    assert.equal(upstreamCalls, 0);
   } finally { server.close(); }
 });

@@ -1,0 +1,15 @@
+# Whitelist only the files the runtime image needs.
+*
+!Dockerfile
+!.dockerignore
+!package.json
+!server.mjs
+
+# Secrets and development files must stay outside the image.
+.env
+.env.*
+*.pem
+*.key
+secrets/
+node_modules/
+.git/

@@ -64,6 +64,23 @@ References: [Google Play Protect warning guidance](https://developers.google.com
 
 ## Set up the AI backend
 
+The app must be connected to a real AI service before it can answer general
+questions. Installing the APK or publishing this repository does not provide that
+connection. The installed Core APK can connect through Settings without an APK
+update.
+
+[Deploy the prepared backend to Render](https://render.com/deploy?repo=https://github.com/fuzailymcmb-boop/jarvis-ai)
+
+The included `render.yaml` selects a free testing service, prompts for the provider
+key privately, and generates the separate personal JARVIS server token. It does
+not create a hosting service until deployed. Free services can sleep and delay
+the first response; AI API usage is billed separately. The deployment must be
+configured and a real question verified before calling the AI connection ready.
+
+See [connection instructions and assistant development stages](docs/ASSISTANT_NEXT_STEPS.md)
+for the concrete setup and next features. The backend also includes a non-root
+Docker image definition for another compatible host.
+
 The backend requires Node.js 22, your own OpenAI API key, and a separate randomly generated personal access token. It does not require npm packages. API usage is billed to the API account.
 
 ```bash
