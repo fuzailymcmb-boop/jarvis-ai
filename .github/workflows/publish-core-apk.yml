@@ -1,0 +1,88 @@
+name: Publish tested JARVIS Core APK download
+
+on:
+  push:
+    branches: [delivery/core-apk-download]
+    paths:
+      - .github/workflows/publish-core-apk.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: jarvis-core-apk-delivery
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'fuzailymcmb-boop/jarvis-ai'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify the successful source build
+        run: |
+          gh api repos/fuzailymcmb-boop/jarvis-ai/actions/runs/45883935801 > source-run.json
+          python3 - <<'PY'
+          import json
+          with open('source-run.json') as source:
+              run = json.load(source)
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['head_sha'] == 'd09bc55aaa6750962a6b3f9907dfeddd8079846f'
+          print('Verified the successful Core build and source commit.')
+          PY
+
+      - name: Download the exact tested Core APK artifact
+        run: gh run download 45883935801 --repo fuzailymcmb-boop/jarvis-ai --name JARVIS-AI-Core-Android-debug-APK --dir verified
+
+      - name: Verify the APK bytes without rebuilding
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          apk = Path('verified/JARVIS-AI-Core-0.1.1.apk')
+          expected = 'e17345640c7106324cba54057a5fcc45c67247a27efa7d49ba0c390416b24ae3'
+          actual = hashlib.sha256(apk.read_bytes()).hexdigest()
+          recorded = Path('verified/SHA256SUMS.txt').read_text().split()
+          assert actual == expected == recorded[0], 'APK checksum differs from the tested build'
+          assert recorded[1] == apk.name
+          assert apk.stat().st_size == 18215021
+          print('Verified Core APK SHA-256:', actual)
+          PY
+
+      - name: Prepare the download description
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## JARVIS AI Core 0.1.1 — Android test build
+
+          Download **JARVIS-AI-Core-0.1.1.apk** from Assets below and open it on an Android 8.0-or-newer phone. This public APK link does not require GitHub sign-in.
+
+          ### What Core includes
+          - Tap-to-talk voice input, spoken responses, and local reminders.
+          - AI conversations when the separate HTTPS backend is configured. No live AI backend or API credentials are included in this APK.
+          - Manual WhatsApp message drafts: choose the recipient, review, and send inside WhatsApp yourself.
+
+          ### What Core excludes
+          Core has no notification-reading service, notification cache, notification-access Settings link, or inline-notification reply implementation. It cannot read incoming WhatsApp notifications or send replies itself. The Full edition remains separately available in the repository and workflow artifacts.
+
+          Google documents a sensitive-permission block for Internet-sideloaded apps that declare notification-listener access. Core genuinely removes that capability. Keep Play Protect enabled; this release is not Google approval and installation on a particular phone remains subject to its security checks. [Google's guidance](https://developers.google.com/android/play-protect/warning-dev-guidance).
+
+          ### Verification
+          This is the exact APK from the successful [source build](https://github.com/fuzailymcmb-boop/jarvis-ai/actions/runs/45883935801), without rebuilding or changing its signature for delivery. Checks include backend tests, both editions' Android unit tests and lint, packaged Core manifest and DEX exclusion checks with a Full positive control, APK signature verification, and clean installation and first launch on Android 10.
+
+          This is a debug build for personal testing. Physical-phone voice, reminder delivery, and manual WhatsApp handoff still need device testing. Core and Full share the same application ID and replace one another. Debug signing keys can differ across builds; an existing installation may report a signature conflict. Uninstalling an app deletes its local data.
+
+          SHA-256: e17345640c7106324cba54057a5fcc45c67247a27efa7d49ba0c390416b24ae3
+          NOTES
+
+      - name: Publish the direct Core APK download
+        run: |
+          gh release create v0.1.1-core.1 \
+            verified/JARVIS-AI-Core-0.1.1.apk verified/SHA256SUMS.txt \
+            --repo fuzailymcmb-boop/jarvis-ai \
+            --target d09bc55aaa6750962a6b3f9907dfeddd8079846f \
+            --prerelease --latest=false \
+            --title "JARVIS AI Core 0.1.1 - Android test build" \
+            --notes-file release-notes.md
