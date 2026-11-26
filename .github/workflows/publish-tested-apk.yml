@@ -1,0 +1,77 @@
+name: Publish tested JARVIS APK download
+
+on:
+  push:
+    branches: [delivery/apk-download]
+    paths:
+      - .github/workflows/publish-tested-apk.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: jarvis-tested-apk-delivery
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'fuzailymcmb-boop/jarvis-ai'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify the successful source build
+        run: |
+          gh api repos/fuzailymcmb-boop/jarvis-ai/actions/runs/45876669177 > source-run.json
+          python3 - <<'PY'
+          import json
+          with open('source-run.json') as source:
+              run = json.load(source)
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['head_sha'] == 'f1ebb41fda55883d1cacc12a279f93e27bae3b32'
+          print('Verified the successful Android build and source commit.')
+          PY
+
+      - name: Download the exact tested APK artifact
+        run: gh run download 45876669177 --repo fuzailymcmb-boop/jarvis-ai --name JARVIS-AI-Android-debug-APK --dir verified
+
+      - name: Verify the APK bytes without rebuilding
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          apk = Path('verified/JARVIS-AI-debug.apk')
+          expected = 'a0c60224cefe732ef67bffc22f24272f1bb2dd82c8415674a535185792e6f087'
+          actual = hashlib.sha256(apk.read_bytes()).hexdigest()
+          recorded = Path('verified/SHA256SUMS.txt').read_text().split()[0]
+          assert actual == expected == recorded, 'APK checksum does not match the tested build'
+          assert apk.stat().st_size == 18215181
+          print('Verified APK SHA-256:', actual)
+          PY
+
+      - name: Prepare the download description
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## JARVIS AI Android test build
+          Download **JARVIS-AI-debug.apk** from Assets below and open it on an Android 8.0-or-newer phone.
+
+          This is the exact APK from the successful [tested build](https://github.com/fuzailymcmb-boop/jarvis-ai/actions/runs/45876669177), without rebuilding or changing its signing identity.
+
+          Validation: seven backend tests using a mock provider, seven Android unit tests, Android lint without errors, APK signature verification, and a successful clean install and launch on Android 10.
+
+          This is a debug build for personal testing. General AI conversations still require the separate HTTPS backend and a configured API account. Physical-phone microphone, reminder delivery, and WhatsApp reply testing remain necessary.
+
+          SHA-256: a0c60224cefe732ef67bffc22f24272f1bb2dd82c8415674a535185792e6f087
+          NOTES
+
+      - name: Publish the direct APK download
+        run: |
+          gh release create v0.1.0-test.1 \
+            verified/JARVIS-AI-debug.apk verified/SHA256SUMS.txt \
+            --repo fuzailymcmb-boop/jarvis-ai \
+            --target f1ebb41fda55883d1cacc12a279f93e27bae3b32 \
+            --prerelease --latest=false \
+            --title "JARVIS AI 0.1.0 - Android test build" \
+            --notes-file release-notes.md
