@@ -24,7 +24,7 @@ This version uses tap-to-talk. Continuous wake-word listening, email, calendar i
 4. Extract the ZIP and install **JARVIS-AI-debug.apk** on an Android phone running Android 8.0 or later.
 5. The ZIP also contains **SHA256SUMS.txt** with the APK checksum.
 
-Each push to `main` runs the backend tests, Android unit tests, Android lint, and APK compilation. The workflow verifies the APK signature before uploading it. A successful build does not substitute for testing microphone, reminders, and WhatsApp on a physical phone.
+Each push to `main` runs the backend tests, Android unit tests, Android lint, APK compilation, and a clean-install launch check on an Android 10 emulator. The workflow verifies the APK signature before uploading it. A successful build does not substitute for testing microphone, reminders, and WhatsApp on a physical phone.
 
 This is a debug APK for personal testing. It is not a Play Store release. Future release distribution needs a maintained signing key. Debug signing keys may differ across hosted build runs, so an update may require uninstalling a previous test build, which removes its local data.
 
